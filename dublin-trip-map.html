@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dublin Trip Map — Eat, Drink & Explore</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tabler-icons/2.47.0/iconfont/tabler-icons.min.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  :root{
+    --surface-0:#faf9f5; --surface-1:#f1efe8; --surface-2:#ffffff;
+    --text-primary:#2c2c2a; --text-secondary:#5f5e5a; --text-muted:#888780;
+    --border:#e0ddd3; --border-strong:#c9c6bb;
+    --font-sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --surface-0:#1a1a18; --surface-1:#262623; --surface-2:#2f2f2c;
+      --text-primary:#ededea; --text-secondary:#b4b2a9; --text-muted:#888780;
+      --border:#3a3a36; --border-strong:#4a4a45;
+    }
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; padding:0; background:var(--surface-0); color:var(--text-primary);
+    font-family:var(--font-sans); line-height:1.6; -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:820px; margin:0 auto; padding:24px 18px 60px;}
+  h1{font-size:22px; font-weight:500; margin:0 0 4px;}
+  .sub{font-size:14px; color:var(--text-secondary); margin:0 0 20px;}
+  #counter{font-size:14px; color:var(--text-secondary); margin-bottom:12px;}
+  #checked-count{font-weight:500; color:var(--text-primary);}
+  #filters{display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px;}
+  .fbtn{cursor:pointer; padding:5px 11px; font-size:13px; display:flex; align-items:center; gap:6px;
+    border-radius:20px; font-family:inherit; transition:all .12s;}
+  .mapbox{position:relative; width:100%; height:min(60vh,480px); border:0.5px solid var(--border);
+    border-radius:12px; overflow:hidden; background:var(--surface-1);}
+  #map{position:absolute; inset:0;}
+  .barrow{display:flex; justify-content:space-between; align-items:center; margin:12px 0 8px;}
+  .hint{font-size:13px; color:var(--text-muted);}
+  #reset, #fitall, #clearfilters{cursor:pointer; padding:4px 12px; font-size:13px; border-radius:8px; background:transparent;
+    border:0.5px solid var(--border-strong); color:var(--text-secondary); font-family:inherit;}
+  #reset:hover, #fitall:hover, #clearfilters:hover{background:var(--surface-1);}
+  .ghead{display:flex; align-items:center; gap:6px; font-size:13px; font-weight:500; margin:14px 0 6px;}
+  .row{display:flex; align-items:flex-start; gap:10px; padding:8px 10px; border:0.5px solid var(--border);
+    border-radius:8px; margin-bottom:6px; cursor:pointer; background:var(--surface-2);}
+  .cbox{flex-shrink:0; width:18px; height:18px; border-radius:4px; display:flex; align-items:center;
+    justify-content:center; margin-top:1px; border:1.5px solid var(--border-strong);}
+  .rname{font-size:14px; font-weight:500; color:var(--text-primary);}
+  .rdesc{font-size:12px; color:var(--text-muted); line-height:1.45; margin-top:2px;}
+  .done .rname{text-decoration:line-through; opacity:0.6;}
+  .leaflet-popup-content{font-family:var(--font-sans);}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Dublin trip — eat, drink &amp; explore</h1>
+  <p class="sub">July 12–19 · based around the Morrison &amp; Temple Bar hotels</p>
+
+  <div id="counter"><span id="checked-count">0</span> of <span id="total-count">0</span> places checked off</div>
+  <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:14px;">
+    <div id="filters" style="margin-bottom:0; flex:1;"></div>
+    <button id="clearfilters" style="flex-shrink:0;">Clear filters</button>
+  </div>
+
+  <div class="mapbox"><div id="map"></div></div>
+
+  <div class="barrow">
+    <span class="hint">Tap a row to check it off · tap a pin for details</span>
+    <div style="display:flex; gap:8px;">
+      <button id="fitall">Fit all</button>
+      <button id="reset">Reset</button>
+    </div>
+  </div>
+
+  <div id="list"></div>
+</div>
+
+<script>
+(function(){
+  const STORAGE_KEY = 'dublin-trip-checked';
+  const cats = {
+    hotel:   { label:'Hotels',      icon:'ti-bed',              hex:'#888780' },
+    planned: { label:'Planned',     icon:'ti-star',             hex:'#BA7517' },
+    pub:     { label:'Pubs',        icon:'ti-beer',             hex:'#993C1D' },
+    food:    { label:'Restaurants', icon:'ti-tools-kitchen-2',  hex:'#D4537E' },
+    coffee:  { label:'Coffee',      icon:'ti-coffee',           hex:'#534AB7' },
+    sight:   { label:'Sights',      icon:'ti-building-monument',hex:'#0F6E56' },
+    shop:    { label:'Shops',       icon:'ti-shopping-bag',     hex:'#185FA5' },
+    nature:  { label:'Views & nature', icon:'ti-mountain',      hex:'#1D9E9E' }
+  };
+
+  const places = [
+    {n:"The Morrison Hotel", c:"hotel", lat:53.3466514, lng:-6.2659595, d:"Your hotel Sun–Tue, on the north quays.", url:'https://www.hilton.com/en/hotels/dubtmqq-the-morrison-dublin/'},
+    {n:"Temple Bar Hotel", c:"hotel", lat:53.3458972, lng:-6.2603319, d:"Your final night, in the heart of Temple Bar.", url:'https://www.discoverasr.com/others/ireland/temple-bar-hotel-dublin'},
+    {n:"Guinness Storehouse", c:"planned", lat:53.3418088, lng:-6.2867156, d:"Mon 7/13 tour. ~20 min walk west. Book a slot; Gravity Bar view up top.", url:'https://www.guinness-storehouse.com/en/home'},
+    {n:"Gallaghers Boxty House", c:"planned", lat:53.3457278, lng:-6.2621719, d:"Mon 7/13 dinner. Traditional boxty in Temple Bar.", url:'http://www.boxtyhouse.ie/'},
+    {n:"Urban Brewing", c:"planned", lat:53.3491519, lng:-6.2482294, d:"Sat 7/18 dinner. Brewery + restaurant at CHQ, ~15 min walk east.", url:'https://www.urbanbrewing.ie/'},
+    {n:"Bar Pez", c:"food", lat:53.3375177, lng:-6.2667194, d:"Tiny Portobello small-plates + wine. Book ahead. Anchovy & scallop toast.", url:'http://barpez.ie/'},
+    {n:"Bambino Pizza", c:"food", lat:53.3411594, lng:-6.2635421, d:"NY-style slices. ~30 min queue but moves fast.", url:'http://www.bambino.ie/'},
+    {n:"The Winding Stair", c:"food", lat:53.3466667, lng:-6.2636111, d:"My pick. Modern-Irish above a bookshop, Ha'penny Bridge views. Book.", url:'http://www.winding-stair.com/'},
+    {n:"Fallon & Byrne", c:"food", lat:53.343151, lng:-6.263287, d:"My pick. Upscale dining room over a food hall.", url:'https://www.fallonandbyrne.com/our-restaurants/the-dining-room/'},
+    {n:"Loose Canon", c:"food", lat:53.3425249, lng:-6.2633229, d:"Natural wine + toasties + cheese on pedestrian Drury St.", url:'https://www.loosecanon.ie/'},
+    {n:"Cookieboy", c:"coffee", lat:53.3413517, lng:-6.2650434, d:"Molten-centre cookies + great coffee. 4.9★. Closes ~5pm.", url:'https://cookieboy.ie/'},
+    {n:"Mister Magpie Coffee", c:"coffee", lat:53.335928, lng:-6.2571568, d:"Excellent coffee, Bread 41 pastries, open weekends. Closes 4:30pm.", url:'https://maps.google.com/?cid=5320124491606783505'},
+    {n:"Copper + Straw", c:"coffee", lat:53.3466003, lng:-6.2600753, d:"4.8★. Cosy Aston Quay spot, 2 min from both hotels. Great cold brew + breakfast sandwiches. Closes 4pm.", url:'http://copperandstraw.ie/'},
+    {n:"Twist Bakery", c:"coffee", lat:53.3460182, lng:-6.2619351, d:"4.9★. Tiny vegan-friendly bakery, knockout pistachio croissants. Limited seating. Closes 3:30pm.", url:'https://www.twistbakerydublin.com/'},
+    {n:"MANTLE", c:"coffee", lat:53.3452253, lng:-6.2618935, d:"4.9★. Coffee-nerd pick — pour-overs & single-origin espresso. Closed Mon & Tue. Closes 4:30pm.", url:'https://www.mantle.coffee/'},
+    {n:"Rumi Café", c:"coffee", lat:53.3445664, lng:-6.2690674, d:"4.9★. West edge of Temple Bar. Open until 7pm — rare late option. Warm service.", url:'https://maps.google.com/?cid=3927333939365632243'},
+    {n:"Brew Lab", c:"coffee", lat:53.3381631, lng:-6.2662471, d:"4.8★, 1,000+ reviews. Competitive-barista pedigree, among the city's best. ~8 min south. Closes 4:30pm.", url:'https://www.instagram.com/brewlabdublin/'},
+    {n:"All Rosey Coffee", c:"coffee", lat:53.3406045, lng:-6.2631725, d:"4.8★. Stylish King St South takeaway, great flat whites + fresh brigadeiros. Closes 5pm.", url:'https://maps.google.com/?cid=14055358899574233487'},
+    {n:"Creed Coffee Roasters", c:"coffee", lat:53.3433830, lng:-6.2448862, d:"4.9★. Roasts its own, €1.50 espresso. ~8 min east on Pearse St. Closes 4pm.", url:'https://creedcoffeeroasters.ie/'},
+    {n:"Shoe Lane Coffee", c:"coffee", lat:53.3471635, lng:-6.2552878, d:"4.7★, 1,200+ reviews. Converted cobbler's shop near Tara St, many call it Dublin's best. Open to 6:30pm.", url:'http://www.shoelanecoffee.ie/'},
+    {n:"Boom Coffee Roasters", c:"coffee", lat:53.3418217, lng:-6.274934, d:"4.9★. Lovely Liberties spot — hit it on the way to/from Guinness. Closes 4pm.", url:'https://maps.google.com/?cid=3643800673360486266'},
+    {n:"O'Donoghues Bar", c:"pub", lat:53.3382083, lng:-6.2542292, d:"Legendary trad-music pub (the Dubliners started here). Near Stephen's Green.", url:'https://www.odonoghues.ie/'},
+    {n:"The Brazen Head", c:"pub", lat:53.3449326, lng:-6.2763323, d:"Ireland's oldest pub (1198). Food + live music, ~8 min west.", url:'http://www.brazenhead.com/'},
+    {n:"The Long Hall", c:"pub", lat:53.3418349, lng:-6.2652064, d:"Gorgeous Victorian pub, crimson ceiling. Great Guinness & whiskey.", url:'https://www.instagram.com/thelonghalldublin/'},
+    {n:"Darkey Kelly's", c:"pub", lat:53.3439551, lng:-6.2699449, d:"Lively, nightly live music, Guinness stew. By Christ Church.", url:'http://darkeykellys.ie/'},
+    {n:"The Cobblestone", c:"pub", lat:53.3498083, lng:-6.2778361, d:"The real deal for trad music. Smithfield, ~12 min. Locals' favourite.", url:'http://cobblestonepub.ie/'},
+    {n:"The Swan Bar", c:"pub", lat:53.3396583, lng:-6.2656855, d:"130-yr-old family Victorian pub. Great Irish coffee. Near Stephen's Green.", url:'http://theswanbar.com/'},
+    {n:"Kehoes Pub", c:"pub", lat:53.3411639, lng:-6.2594277, d:"200-yr-old pub, cozy snugs, top Guinness pour. Off Grafton St.", url:'http://kehoesdublin.ie/'},
+    {n:"Grogan's", c:"pub", lat:53.3422396, lng:-6.2626181, d:"My pick. Iconic old-school pub, famous toastie + artsy crowd.", url:'http://www.groganspub.ie/'},
+    {n:"Mulligan's", c:"pub", lat:53.3468861, lng:-6.2554264, d:"My pick. Many locals' best-Guinness vote. Just outside Temple Bar.", url:'https://www.facebook.com/profile.php?id=100064593853632'},
+    {n:"The Hairy Lemon", c:"pub", lat:53.341233, lng:-6.2637511, d:"My pick. Characterful pub, hearty stew + live music.", url:'https://thehairylemon.ie/'},
+    {n:"Book of Kells & Long Room", c:"sight", lat:53.343888, lng:-6.2567554, d:"My pick. 9th-c. manuscript + stunning library. Book a slot. ~7 min.", url:'https://bookofkellsexperience.ie/'},
+    {n:"Dublin Castle", c:"sight", lat:53.3428861, lng:-6.2674284, d:"My pick. 13th-c. castle + Georgian state rooms. Grounds free. 5 min.", url:'https://dublincastle.ie/'},
+    {n:"Chapters Bookstore", c:"shop", lat:53.3515089, lng:-6.2639632, d:"My pick. Ireland's largest independent bookshop + café. ~8 min north.", url:'http://chaptersbookstore.com/'},
+    {n:"Nine Crows Vintage", c:"shop", lat:53.3447852, lng:-6.2641723, d:"Curated vintage clothing + photobooth. In Temple Bar.", url:'http://www.shopninecrows.com/'},
+    {n:"Irish Design Shop", c:"shop", lat:53.3427432, lng:-6.2629527, d:"4.6★. Two floors of Irish-made ceramics, jewellery, prints & woollens. Drury St. Closes 6pm.", url:'http://irishdesignshop.com/'},
+    {n:"Om Diva", c:"shop", lat:53.3423913, lng:-6.2633902, d:"4.8★. Beautifully curated boutique — handmade Irish accessories, jewellery, quirky outfits. Cash-friendly. Drury St.", url:'http://www.omdivaboutique.com/'},
+    {n:"Indigo & Cloth", c:"shop", lat:53.3452013, lng:-6.2661415, d:"4.8★. Stylish 3-floor menswear/homeware concept store with a great coffee bar downstairs. Temple Bar.", url:'http://www.indigoandcloth.com/'},
+    {n:"Jam Art Factory", c:"shop", lat:53.345149, lng:-6.2628761, d:"4.6★. Prints & design by local independent artists — affordable, unique souvenirs. Crown Alley, Temple Bar.", url:'https://jamartfactory.com/'},
+    {n:"designist", c:"shop", lat:53.3426386, lng:-6.2646535, d:"4.6★. Fun gadgets, gifts, stationery & Irish design on George's St. Closes 6pm.", url:'http://www.designist.ie/'},
+    {n:"Unique Crafts & Design", c:"shop", lat:53.3424684, lng:-6.2635862, d:"4.8★. Handmade ceramics, jewellery & art in George's Street Arcade — artist-run.", url:'http://www.uniqueshop.ie/'},
+    {n:"Design Lane", c:"shop", lat:53.3446612, lng:-6.2684912, d:"4.4★. Sweet little shop of Irish prints, candles, clothes & books. West Temple Bar.", url:'https://designlane.ie/'},
+    {n:"The Secret Book & Record Store", c:"shop", lat:53.3430691, lng:-6.2610993, d:"4.7★. Quirky hidden gem — used books, vinyl & curiosities on Wicklow St.", url:'https://www.thesecretbookstore.ie/'},
+    {n:"Spindizzy Records", c:"shop", lat:53.3425126, lng:-6.2639295, d:"4.6★. Beloved independent record shop in the Market Arcade off George's St.", url:'https://spindizzyrecords.com/'},
+    {n:"Kilmainham Gaol", c:"sight", lat:53.3418701, lng:-6.3098048, d:"4.7★. The emotional heart of Ireland's independence story — moving guided tour. BOOK WEEKS AHEAD, sells out. ~35 min walk / short taxi west.", url:'https://www.kilmainhamgaolmuseum.ie/'},
+    {n:"Christ Church Cathedral", c:"sight", lat:53.3435130, lng:-6.2710602, d:"4.5★. Stunning medieval cathedral with a historic crypt. ~7 min walk from Temple Bar.", url:'https://christchurchcathedral.ie/'},
+    {n:"St Patrick's Cathedral", c:"sight", lat:53.3395154, lng:-6.2714767, d:"4.5★. Ireland's largest church, gorgeous Gothic architecture. ~12 min walk south.", url:'https://www.stpatrickscathedral.ie/'},
+    {n:"EPIC Emigration Museum", c:"sight", lat:53.3483124, lng:-6.2481792, d:"4.6★. Often voted Europe's top attraction — far better than it sounds. Right next to Urban Brewing; pair with Sat dinner.", url:'https://epicchq.com/'},
+    {n:"Poolbeg Lighthouse", c:"nature", lat:53.3421383, lng:-6.1512796, d:"4.7★. ~4km flat walk out into Dublin Bay to a red lighthouse — panoramic skyline + sunset views. Drive/taxi (~20 min); no shops, bring water.", url:'https://www.dublinport.ie/'},
+    {n:"Howth", c:"nature", lat:53.3890036, lng:-6.0741398, d:"4.5★. Seaside village + cliff walk + seafood. ~30 min DART. Your saved coffee spots (Bailey Brew, Bodega) are here. Classic half-day escape.", url:'https://www.irishrail.ie/en-ie/station/howth'},
+    {n:"Phoenix Park", c:"nature", lat:53.3490364, lng:-6.303101, d:"4.6★. Europe's largest walled park — wild deer, Wellington Monument. Next to the Guinness Storehouse; easy to pair on Monday.", url:'https://maps.google.com/?cid=8617691855706575297'},
+    {n:"St Stephen's Green", c:"nature", lat:53.3381736, lng:-6.259119, d:"4.7★. Beautiful central park just off Grafton St — the easiest green breather between stops.", url:'http://ststephensgreenpark.ie/'}
+  ];
+  places.forEach((p,i)=>p.id=i);
+
+  let saved=[];
+  try{ saved = JSON.parse(localStorage.getItem(STORAGE_KEY)||'[]'); }catch(e){}
+  const state = { checked:new Set(saved), active:new Set(Object.keys(cats)) };
+  function persist(){ try{ localStorage.setItem(STORAGE_KEY, JSON.stringify([...state.checked])); }catch(e){} }
+
+  const map = L.map('map',{scrollWheelZoom:false, attributionControl:false}).setView([53.3455,-6.263],14);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{maxZoom:19}).addTo(map);
+  L.control.attribution({prefix:false}).addAttribution('© OpenStreetMap © CARTO').addTo(map);
+
+  const markers={};
+  function makeIcon(p){
+    const done=state.checked.has(p.id), hex=cats[p.c].hex;
+    return L.divIcon({className:'', iconSize:[0,0],
+      html:`<div style="transform:translate(-50%,-100%); display:flex; flex-direction:column; align-items:center; cursor:pointer; opacity:${done?0.5:1};">
+        <div style="display:flex; align-items:center; gap:4px; background:var(--surface-2); border:1px solid ${hex}; border-radius:6px; padding:2px 6px; white-space:nowrap; font-family:var(--font-sans); font-size:11px; font-weight:500; color:var(--text-primary); box-shadow:0 1px 3px rgba(0,0,0,0.18);">
+          <i class="ti ${done?'ti-check':cats[p.c].icon}" style="color:${hex}"></i>
+          <span style="${done?'text-decoration:line-through; opacity:0.7;':''}">${p.n}</span>
+        </div>
+        <div style="width:2px; height:8px; background:${hex};"></div>
+      </div>`});
+  }
+  places.forEach(p=>{
+    const m=L.marker([p.lat,p.lng],{icon:makeIcon(p)}).addTo(map);
+    m.on('click',()=>{
+      L.popup({closeButton:true, maxWidth:240}).setLatLng([p.lat,p.lng])
+        .setContent(`<div style="font-size:13px;"><div style="font-weight:500; margin-bottom:4px;">${p.n}</div><div style="color:#5f5e5a; line-height:1.5;">${p.d}</div>${p.url?`<a href="${p.url}" target="_blank" rel="noopener" style="display:inline-flex; align-items:center; gap:4px; margin-top:6px; font-size:12px; color:var(--text-secondary); text-decoration:none; border-bottom:1px solid var(--border-strong);"><i class="ti ti-external-link" style="font-size:12px;"></i>Website</a>`:''}</div>`)
+        .openOn(map);
+    });
+    markers[p.id]=m;
+  });
+  function refreshMarker(p){ markers[p.id].setIcon(makeIcon(p)); }
+
+  function toggle(id){
+    if(state.checked.has(id)) state.checked.delete(id); else state.checked.add(id);
+    persist(); refreshMarker(places[id]); renderList(); updateCount();
+  }
+  function updateCount(){
+    document.getElementById('checked-count').textContent=state.checked.size;
+    document.getElementById('total-count').textContent=places.length;
+  }
+  function renderFilters(){
+    const wrap=document.getElementById('filters'); wrap.innerHTML='';
+    Object.keys(cats).forEach(k=>{
+      const on=state.active.has(k), c=cats[k];
+      const b=document.createElement('button'); b.className='fbtn';
+      b.style.border=`0.5px solid ${on?c.hex:'var(--border)'}`;
+      b.style.background=on?c.hex:'transparent';
+      b.style.color=on?'#fff':'var(--text-secondary)';
+      b.innerHTML=`<i class="ti ${c.icon}"></i>${c.label}`;
+      b.onclick=()=>{ if(state.active.has(k)) state.active.delete(k); else state.active.add(k); renderFilters(); applyFilter(); renderList(); };
+      wrap.appendChild(b);
+    });
+  }
+  function applyFilter(){
+    places.forEach(p=>{ if(state.active.has(p.c)) markers[p.id].addTo(map); else map.removeLayer(markers[p.id]); });
+  }
+  function renderList(){
+    const grouped={};
+    places.filter(p=>state.active.has(p.c)).forEach(p=>{ (grouped[p.c]=grouped[p.c]||[]).push(p); });
+    const el=document.getElementById('list'); el.innerHTML='';
+    Object.keys(cats).forEach(k=>{
+      if(!grouped[k]) return; const c=cats[k];
+      const h=document.createElement('div'); h.className='ghead'; h.style.color=c.hex;
+      h.innerHTML=`<i class="ti ${c.icon}"></i>${c.label}`; el.appendChild(h);
+      grouped[k].forEach(p=>{
+        const done=state.checked.has(p.id);
+        const row=document.createElement('div'); row.className='row'+(done?' done':'');
+        row.onclick=(e)=>{ if(e.target.closest('.wlink')) return; toggle(p.id); };
+        row.innerHTML=`
+          <div class="cbox" style="border-color:${done?c.hex:'var(--border-strong)'}; background:${done?c.hex:'transparent'};">
+            ${done?'<i class="ti ti-check" style="color:#fff; font-size:13px;"></i>':''}
+          </div>
+          <div style="flex:1; min-width:0;">
+            <div class="rname" style="display:flex; align-items:center; gap:6px;">${p.n}${p.url?`<a class="wlink" href="${p.url}" target="_blank" rel="noopener" style="color:var(--text-muted); display:inline-flex; align-items:center;" title="Website"><i class="ti ti-external-link" style="font-size:13px;"></i></a>`:''}</div>
+            <div class="rdesc">${p.d}</div>
+          </div>`;
+        el.appendChild(row);
+      });
+    });
+  }
+  document.getElementById('reset').onclick=()=>{ state.checked.clear(); persist(); places.forEach(refreshMarker); renderList(); updateCount(); };
+  document.getElementById('fitall').onclick=()=>{
+    const visible=places.filter(p=>state.active.has(p.c)).map(p=>[p.lat,p.lng]);
+    if(visible.length) map.fitBounds(visible,{padding:[35,35]});
+  };
+  document.getElementById('clearfilters').onclick=()=>{
+    state.active.clear();
+    renderFilters(); applyFilter(); renderList();
+  };
+
+  renderFilters(); applyFilter(); renderList(); updateCount();
+})();
+</script>
+</body>
+</html>
